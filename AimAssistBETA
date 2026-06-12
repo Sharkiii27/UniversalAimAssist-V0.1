@@ -1,0 +1,674 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local Player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- SETTINGS
+local Enabled = false
+local Smoothness = 0.15
+local TargetPart = "Head"
+local CurrentTarget = nil
+local Minimized = false
+local FovRadius = 70
+
+-- ESP SETTINGS
+local EspEnabled = false
+local HitboxEnabled = false
+local HealthBarEnabled = false
+local EspDistance = 500
+
+local EspObjects = {} -- stores per-player ESP elements
+
+-- UI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LockOnUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+
+-- FOV Circle
+local FovCircle = Instance.new("Frame")
+FovCircle.Size = UDim2.new(0, FovRadius * 2, 0, FovRadius * 2)
+FovCircle.Position = UDim2.new(0.5, -FovRadius, 0.5, -FovRadius)
+FovCircle.BackgroundTransparency = 1
+FovCircle.BorderSizePixel = 0
+FovCircle.Parent = ScreenGui
+
+local FovStroke = Instance.new("UIStroke")
+FovStroke.Thickness = 1.5
+FovStroke.Color = Color3.fromRGB(255,255,255)
+FovStroke.Transparency = 0.4
+FovStroke.Parent = FovCircle
+
+local FovCircleCorner = Instance.new("UICorner")
+FovCircleCorner.CornerRadius = UDim.new(1,0)
+FovCircleCorner.Parent = FovCircle
+
+-- Main Panel
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0,270,0,310)
+Frame.Position = UDim2.new(0,20,0.5,-155)
+Frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+Frame.BorderSizePixel = 0
+Frame.ClipsDescendants = true
+Frame.Parent = ScreenGui
+
+local Corner = Instance.new("UICorner")
+Corner.Parent = Frame
+
+-- Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1,0,0,35)
+TitleBar.BackgroundTransparency = 1
+TitleBar.Parent = Frame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1,-40,1,0)
+Title.BackgroundTransparency = 1
+Title.Text = "Player Lock-On System"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Position = UDim2.new(0,10,0,0)
+Title.Parent = TitleBar
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Size = UDim2.new(0,28,0,28)
+MinimizeButton.Position = UDim2.new(1,-33,0,3)
+MinimizeButton.Text = "—"
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(60,60,60)
+MinimizeButton.TextColor3 = Color3.new(1,1,1)
+MinimizeButton.Font = Enum.Font.GothamBold
+MinimizeButton.TextSize = 14
+MinimizeButton.Parent = TitleBar
+
+local MinimizeCorner = Instance.new("UICorner")
+MinimizeCorner.CornerRadius = UDim.new(0,4)
+MinimizeCorner.Parent = MinimizeButton
+
+-- Tab Bar
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1,0,0,30)
+TabBar.Position = UDim2.new(0,0,0,35)
+TabBar.BackgroundColor3 = Color3.fromRGB(18,18,18)
+TabBar.BorderSizePixel = 0
+TabBar.Parent = Frame
+
+local function MakeTab(text, xPos)
+	local Btn = Instance.new("TextButton")
+	Btn.Size = UDim2.new(0.5,0,1,0)
+	Btn.Position = UDim2.new(xPos,0,0,0)
+	Btn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+	Btn.TextColor3 = Color3.fromRGB(180,180,180)
+	Btn.Font = Enum.Font.GothamBold
+	Btn.TextSize = 13
+	Btn.Text = text
+	Btn.BorderSizePixel = 0
+	Btn.Parent = TabBar
+	return Btn
+end
+
+local LockTab = MakeTab("Lock-On", 0)
+local EspTab  = MakeTab("ESP", 0.5)
+
+-- Active tab indicator (underline)
+local Indicator = Instance.new("Frame")
+Indicator.Size = UDim2.new(0.5,0,0,2)
+Indicator.Position = UDim2.new(0,0,1,-2)
+Indicator.BackgroundColor3 = Color3.fromRGB(100,200,255)
+Indicator.BorderSizePixel = 0
+Indicator.Parent = TabBar
+
+-- Content Pages (sit below tab bar at y=65)
+local function MakePage()
+	local P = Instance.new("Frame")
+	P.Size = UDim2.new(1,0,1,-65)
+	P.Position = UDim2.new(0,0,0,65)
+	P.BackgroundTransparency = 1
+	P.Visible = false
+	P.Parent = Frame
+	return P
+end
+
+local LockPage = MakePage()
+local EspPage  = MakePage()
+LockPage.Visible = true
+
+-- Helper: toggle button style
+local function MakeToggle(parent, labelText, yPos)
+	local Row = Instance.new("Frame")
+	Row.Size = UDim2.new(0.9,0,0,32)
+	Row.Position = UDim2.new(0.05,0,0,yPos)
+	Row.BackgroundColor3 = Color3.fromRGB(38,38,38)
+	Row.BorderSizePixel = 0
+	Row.Parent = parent
+
+	local RowCorner = Instance.new("UICorner")
+	RowCorner.CornerRadius = UDim.new(0,6)
+	RowCorner.Parent = Row
+
+	local Label = Instance.new("TextLabel")
+	Label.Size = UDim2.new(0.75,0,1,0)
+	Label.Position = UDim2.new(0,10,0,0)
+	Label.BackgroundTransparency = 1
+	Label.Text = labelText
+	Label.TextColor3 = Color3.new(1,1,1)
+	Label.Font = Enum.Font.Gotham
+	Label.TextSize = 13
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Parent = Row
+
+	local Pill = Instance.new("TextButton")
+	Pill.Size = UDim2.new(0,40,0,20)
+	Pill.Position = UDim2.new(1,-48,0.5,-10)
+	Pill.BackgroundColor3 = Color3.fromRGB(70,70,70)
+	Pill.Text = ""
+	Pill.BorderSizePixel = 0
+	Pill.Parent = Row
+
+	local PillCorner = Instance.new("UICorner")
+	PillCorner.CornerRadius = UDim.new(1,0)
+	PillCorner.Parent = Pill
+
+	local Dot = Instance.new("Frame")
+	Dot.Size = UDim2.new(0,14,0,14)
+	Dot.Position = UDim2.new(0,3,0.5,-7)
+	Dot.BackgroundColor3 = Color3.fromRGB(180,180,180)
+	Dot.BorderSizePixel = 0
+	Dot.Parent = Pill
+
+	local DotCorner = Instance.new("UICorner")
+	DotCorner.CornerRadius = UDim.new(1,0)
+	DotCorner.Parent = Dot
+
+	local IsOn = false
+
+	local function SetState(state)
+		IsOn = state
+		if IsOn then
+			Pill.BackgroundColor3 = Color3.fromRGB(100,200,100)
+			Dot.Position = UDim2.new(1,-17,0.5,-7)
+			Dot.BackgroundColor3 = Color3.fromRGB(255,255,255)
+		else
+			Pill.BackgroundColor3 = Color3.fromRGB(70,70,70)
+			Dot.Position = UDim2.new(0,3,0.5,-7)
+			Dot.BackgroundColor3 = Color3.fromRGB(180,180,180)
+		end
+	end
+
+	return Pill, SetState, function() return IsOn end
+end
+
+-- Helper: labeled text box row
+local function MakeInputRow(parent, labelText, defaultVal, yPos)
+	local Label = Instance.new("TextLabel")
+	Label.Size = UDim2.new(0.9,0,0,22)
+	Label.Position = UDim2.new(0.05,0,0,yPos)
+	Label.BackgroundTransparency = 1
+	Label.Text = labelText
+	Label.TextColor3 = Color3.fromRGB(200,200,200)
+	Label.Font = Enum.Font.Gotham
+	Label.TextSize = 12
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Parent = parent
+
+	local Box = Instance.new("TextBox")
+	Box.Size = UDim2.new(0.9,0,0,28)
+	Box.Position = UDim2.new(0.05,0,0,yPos+22)
+	Box.Text = tostring(defaultVal)
+	Box.BackgroundColor3 = Color3.fromRGB(38,38,38)
+	Box.TextColor3 = Color3.new(1,1,1)
+	Box.Font = Enum.Font.Gotham
+	Box.TextSize = 13
+	Box.BorderSizePixel = 0
+	Box.Parent = parent
+
+	local BoxCorner = Instance.new("UICorner")
+	BoxCorner.CornerRadius = UDim.new(0,6)
+	BoxCorner.Parent = Box
+
+	return Label, Box
+end
+
+-- Helper: slider row
+local function MakeSlider(parent, labelText, minVal, maxVal, defaultVal, yPos, onChange)
+	local Label = Instance.new("TextLabel")
+	Label.Size = UDim2.new(0.9,0,0,22)
+	Label.Position = UDim2.new(0.05,0,0,yPos)
+	Label.BackgroundTransparency = 1
+	Label.Text = labelText..": "..defaultVal
+	Label.TextColor3 = Color3.fromRGB(200,200,200)
+	Label.Font = Enum.Font.Gotham
+	Label.TextSize = 12
+	Label.TextXAlignment = Enum.TextXAlignment.Left
+	Label.Parent = parent
+
+	local Track = Instance.new("Frame")
+	Track.Size = UDim2.new(0.9,0,0,6)
+	Track.Position = UDim2.new(0.05,0,0,yPos+28)
+	Track.BackgroundColor3 = Color3.fromRGB(50,50,50)
+	Track.BorderSizePixel = 0
+	Track.Parent = parent
+
+	local TrackCorner = Instance.new("UICorner")
+	TrackCorner.CornerRadius = UDim.new(1,0)
+	TrackCorner.Parent = Track
+
+	local Fill = Instance.new("Frame")
+	Fill.Size = UDim2.new((defaultVal - minVal)/(maxVal - minVal),0,1,0)
+	Fill.BackgroundColor3 = Color3.fromRGB(100,200,255)
+	Fill.BorderSizePixel = 0
+	Fill.Parent = Track
+
+	local FillCorner = Instance.new("UICorner")
+	FillCorner.CornerRadius = UDim.new(1,0)
+	FillCorner.Parent = Fill
+
+	local Knob = Instance.new("TextButton")
+	Knob.Size = UDim2.new(0,16,0,16)
+	Knob.AnchorPoint = Vector2.new(0.5,0.5)
+	Knob.Position = UDim2.new((defaultVal - minVal)/(maxVal - minVal),0,0.5,0)
+	Knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+	Knob.Text = ""
+	Knob.BorderSizePixel = 0
+	Knob.ZIndex = 5
+	Knob.Parent = Track
+
+	local KnobCorner = Instance.new("UICorner")
+	KnobCorner.CornerRadius = UDim.new(1,0)
+	KnobCorner.Parent = Knob
+
+	local Dragging = false
+
+	Knob.MouseButton1Down:Connect(function()
+		Dragging = true
+	end)
+
+	UserInputService.InputEnded:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+			Dragging = false
+		end
+	end)
+
+	RunService.RenderStepped:Connect(function()
+		if not Dragging then return end
+		local TrackPos = Track.AbsolutePosition
+		local TrackSize = Track.AbsoluteSize
+		local MouseX = UserInputService:GetMouseLocation().X
+		local Alpha = math.clamp((MouseX - TrackPos.X) / TrackSize.X, 0, 1)
+		local Value = math.floor(minVal + (maxVal - minVal) * Alpha)
+		Fill.Size = UDim2.new(Alpha,0,1,0)
+		Knob.Position = UDim2.new(Alpha,0,0.5,0)
+		Label.Text = labelText..": "..Value
+		if onChange then onChange(Value) end
+	end)
+end
+
+-- ========================
+-- LOCK-ON PAGE CONTENTS
+-- ========================
+local LockTogglePill, SetLockToggle = MakeToggle(LockPage, "Enable Lock-On", 8)
+local _, FovBoxNew = MakeInputRow(LockPage, "FOV Circle Radius", 70, 50)
+local _, SmoothBoxNew = MakeInputRow(LockPage, "Smoothness (0.01 – 1)", 0.15, 105)
+
+local TargetBtn = Instance.new("TextButton")
+TargetBtn.Size = UDim2.new(0.9,0,0,30)
+TargetBtn.Position = UDim2.new(0.05,0,0,165)
+TargetBtn.Text = "Target Part: Head"
+TargetBtn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+TargetBtn.TextColor3 = Color3.new(1,1,1)
+TargetBtn.Font = Enum.Font.Gotham
+TargetBtn.TextSize = 13
+TargetBtn.Parent = LockPage
+
+local TBCorner = Instance.new("UICorner")
+TBCorner.CornerRadius = UDim.new(0,6)
+TBCorner.Parent = TargetBtn
+
+-- ========================
+-- ESP PAGE CONTENTS
+-- ========================
+local EspTogglePill,    SetEspToggle    = MakeToggle(EspPage, "Enable ESP",       8)
+local HitboxTogglePill, SetHitboxToggle = MakeToggle(EspPage, "Hitbox ESP",      50)
+local HealthTogglePill, SetHealthToggle = MakeToggle(EspPage, "Health Bar ESP",  92)
+
+MakeSlider(EspPage, "ESP Distance", 50, 2000, 500, 140, function(v)
+	EspDistance = v
+end)
+
+-- ========================
+-- TAB SWITCHING
+-- ========================
+local function SwitchTab(toLock)
+	LockPage.Visible = toLock
+	EspPage.Visible  = not toLock
+	if toLock then
+		Indicator.Position = UDim2.new(0,0,1,-2)
+		LockTab.TextColor3 = Color3.fromRGB(255,255,255)
+		EspTab.TextColor3  = Color3.fromRGB(180,180,180)
+	else
+		Indicator.Position = UDim2.new(0.5,0,1,-2)
+		EspTab.TextColor3  = Color3.fromRGB(255,255,255)
+		LockTab.TextColor3 = Color3.fromRGB(180,180,180)
+	end
+end
+
+LockTab.MouseButton1Click:Connect(function() SwitchTab(true)  end)
+EspTab.MouseButton1Click:Connect(function()  SwitchTab(false) end)
+SwitchTab(true)
+
+-- ========================
+-- TOGGLE PILL CONNECTIONS
+-- ========================
+LockTogglePill.MouseButton1Click:Connect(function()
+	Enabled = not Enabled
+	SetLockToggle(Enabled)
+	if not Enabled then
+		CurrentTarget = nil
+		FovStroke.Color = Color3.fromRGB(255,255,255)
+	else
+		FovStroke.Color = Color3.fromRGB(100,220,100)
+	end
+end)
+
+EspTogglePill.MouseButton1Click:Connect(function()
+	EspEnabled = not EspEnabled
+	SetEspToggle(EspEnabled)
+	if not EspEnabled then
+		-- hide all ESP
+		for _, obj in pairs(EspObjects) do
+			if obj.Billboard then obj.Billboard.Enabled = false end
+			if obj.Hitbox    then obj.Hitbox.Enabled    = false end
+			if obj.HealthBG  then obj.HealthBG.Enabled  = false end
+		end
+	end
+end)
+
+HitboxTogglePill.MouseButton1Click:Connect(function()
+	HitboxEnabled = not HitboxEnabled
+	SetHitboxToggle(HitboxEnabled)
+end)
+
+HealthTogglePill.MouseButton1Click:Connect(function()
+	HealthBarEnabled = not HealthBarEnabled
+	SetHealthToggle(HealthBarEnabled)
+end)
+
+-- FOV / Smooth inputs
+FovBoxNew.FocusLost:Connect(function()
+	local v = tonumber(FovBoxNew.Text)
+	if v then
+		v = math.clamp(v, 10, 600)
+		FovRadius = v
+		FovCircle.Size = UDim2.new(0, v*2, 0, v*2)
+		FovCircle.Position = UDim2.new(0.5, -v, 0.5, -v)
+	end
+end)
+
+SmoothBoxNew.FocusLost:Connect(function()
+	local v = tonumber(SmoothBoxNew.Text)
+	if v then Smoothness = math.clamp(v, 0.01, 1) end
+end)
+
+-- Target part cycle
+local Parts = {"Head","HumanoidRootPart","Torso","UpperTorso"}
+local PartIndex = 1
+TargetBtn.MouseButton1Click:Connect(function()
+	PartIndex += 1
+	if PartIndex > #Parts then PartIndex = 1 end
+	TargetPart = Parts[PartIndex]
+	TargetBtn.Text = "Target Part: "..TargetPart
+end)
+
+-- Minimize
+local ExpandedSize  = UDim2.new(0,270,0,310)
+local ExpandedPos   = UDim2.new(0,20,0.5,-155)
+local MinimizedSize = UDim2.new(0,270,0,35)
+local MinimizedPos  = UDim2.new(0,20,1,-55)
+
+MinimizeButton.MouseButton1Click:Connect(function()
+	Minimized = not Minimized
+	if Minimized then
+		Frame:TweenSize(MinimizedSize, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+		Frame:TweenPosition(MinimizedPos, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+		MinimizeButton.Text = "+"
+	else
+		Frame:TweenSize(ExpandedSize, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+		Frame:TweenPosition(ExpandedPos, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+		MinimizeButton.Text = "—"
+	end
+end)
+
+-- ========================
+-- ESP RENDERING
+-- ========================
+
+-- Creates a BillboardGui set of ESP elements for a character
+local function CreateEspForPlayer(OtherPlayer)
+	local Char = OtherPlayer.Character
+	if not Char then return end
+
+	local Root = Char:FindFirstChild("HumanoidRootPart")
+	if not Root then return end
+
+	-- Main billboard (name + hitbox container)
+	local Billboard = Instance.new("BillboardGui")
+	Billboard.Adornee = Root
+	Billboard.Size = UDim2.new(0,60,0,80)
+	Billboard.StudsOffset = Vector3.new(0,3,0)
+	Billboard.AlwaysOnTop = true
+	Billboard.Enabled = false
+	Billboard.Parent = ScreenGui
+
+	-- Name label
+	local NameLabel = Instance.new("TextLabel")
+	NameLabel.Size = UDim2.new(1,0,0,16)
+	NameLabel.Position = UDim2.new(0,0,0,0)
+	NameLabel.BackgroundTransparency = 1
+	NameLabel.Text = OtherPlayer.Name
+	NameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+	NameLabel.Font = Enum.Font.GothamBold
+	NameLabel.TextSize = 11
+	NameLabel.Parent = Billboard
+
+	-- Hitbox (white outline box around player)
+	local HitboxGui = Instance.new("BillboardGui")
+	HitboxGui.Adornee = Root
+	HitboxGui.Size = UDim2.new(0,46,0,70)
+	HitboxGui.StudsOffset = Vector3.new(0,1,0)
+	HitboxGui.AlwaysOnTop = true
+	HitboxGui.Enabled = false
+	HitboxGui.Parent = ScreenGui
+
+	local HitboxFrame = Instance.new("Frame")
+	HitboxFrame.Size = UDim2.new(1,0,1,0)
+	HitboxFrame.BackgroundTransparency = 1
+	HitboxFrame.Parent = HitboxGui
+
+	local HitboxStroke = Instance.new("UIStroke")
+	HitboxStroke.Color = Color3.fromRGB(255,255,255)
+	HitboxStroke.Thickness = 1.2
+	HitboxStroke.Parent = HitboxFrame
+
+	-- Health bar (left side of hitbox)
+	local HealthBG = Instance.new("BillboardGui")
+	HealthBG.Adornee = Root
+	HealthBG.Size = UDim2.new(0,4,0,70)
+	HealthBG.StudsOffset = Vector3.new(-2.8,1,0)
+	HealthBG.AlwaysOnTop = true
+	HealthBG.Enabled = false
+	HealthBG.Parent = ScreenGui
+
+	local HealthTrack = Instance.new("Frame")
+	HealthTrack.Size = UDim2.new(1,0,1,0)
+	HealthTrack.BackgroundColor3 = Color3.fromRGB(50,50,50)
+	HealthTrack.BorderSizePixel = 0
+	HealthTrack.Parent = HealthBG
+
+	local HealthFill = Instance.new("Frame")
+	HealthFill.Size = UDim2.new(1,0,1,0) -- updated each frame
+	HealthFill.AnchorPoint = Vector2.new(0,1)
+	HealthFill.Position = UDim2.new(0,0,1,0)
+	HealthFill.BackgroundColor3 = Color3.fromRGB(80,220,80)
+	HealthFill.BorderSizePixel = 0
+	HealthFill.Parent = HealthTrack
+
+	EspObjects[OtherPlayer.UserId] = {
+		Billboard  = Billboard,
+		Hitbox     = HitboxGui,
+		HealthBG   = HealthBG,
+		HealthFill = HealthFill,
+		Character  = Char,
+		HumanoidRef = Char:FindFirstChildOfClass("Humanoid"),
+	}
+end
+
+local function RemoveEspForPlayer(OtherPlayer)
+	local obj = EspObjects[OtherPlayer.UserId]
+	if obj then
+		if obj.Billboard then obj.Billboard:Destroy() end
+		if obj.Hitbox    then obj.Hitbox:Destroy()    end
+		if obj.HealthBG  then obj.HealthBG:Destroy()  end
+		EspObjects[OtherPlayer.UserId] = nil
+	end
+end
+
+-- Build ESP for existing players and hook new ones
+for _, p in ipairs(Players:GetPlayers()) do
+	if p ~= Player then CreateEspForPlayer(p) end
+end
+
+Players.PlayerAdded:Connect(function(p)
+	p.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		RemoveEspForPlayer(p)
+		CreateEspForPlayer(p)
+	end)
+	CreateEspForPlayer(p)
+end)
+
+Players.PlayerRemoving:Connect(RemoveEspForPlayer)
+
+-- Rebuild ESP when a player's character respawns
+for _, p in ipairs(Players:GetPlayers()) do
+	if p ~= Player then
+		p.CharacterAdded:Connect(function()
+			task.wait(0.5)
+			RemoveEspForPlayer(p)
+			CreateEspForPlayer(p)
+		end)
+	end
+end
+
+-- ========================
+-- LOCK-ON LOGIC
+-- ========================
+local function GetNearestPlayerToCrosshair()
+	local Character = Player.Character
+	if not Character then return nil end
+	local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+	if not Humanoid or Humanoid.Health <= 0 then return nil end
+
+	local Center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+	local Closest, ClosestDist = nil, math.huge
+
+	for _, OtherPlayer in ipairs(Players:GetPlayers()) do
+		if OtherPlayer == Player then continue end
+		local OtherChar = OtherPlayer.Character
+		if not OtherChar then continue end
+		local OtherHum = OtherChar:FindFirstChildOfClass("Humanoid")
+		if not OtherHum or OtherHum.Health <= 0 then continue end
+		local Part = OtherChar:FindFirstChild(TargetPart)
+		if not Part then continue end
+		local ScreenPos, OnScreen = Camera:WorldToScreenPoint(Part.Position)
+		if not OnScreen then continue end
+		local Dist = (Vector2.new(ScreenPos.X, ScreenPos.Y) - Center).Magnitude
+		if Dist <= FovRadius and Dist < ClosestDist then
+			ClosestDist = Dist
+			Closest = OtherChar
+		end
+	end
+
+	return Closest
+end
+
+UserInputService.InputBegan:Connect(function(Input, Processed)
+	if Processed then return end
+	if Input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if not Enabled then return end
+		if CurrentTarget then
+			CurrentTarget = nil
+			FovStroke.Color = Color3.fromRGB(100,220,100)
+		else
+			CurrentTarget = GetNearestPlayerToCrosshair()
+			if CurrentTarget then
+				FovStroke.Color = Color3.fromRGB(220,60,60)
+			end
+		end
+	end
+end)
+
+-- ========================
+-- RENDER LOOP
+-- ========================
+RunService.RenderStepped:Connect(function()
+	-- Lock-on camera
+	if Enabled and CurrentTarget then
+		local Hum = CurrentTarget:FindFirstChildOfClass("Humanoid")
+		if not Hum or Hum.Health <= 0 then
+			CurrentTarget = nil
+			FovStroke.Color = Color3.fromRGB(100,220,100)
+		else
+			local Part = CurrentTarget:FindFirstChild(TargetPart)
+			if Part then
+				Camera.CFrame = Camera.CFrame:Lerp(
+					CFrame.lookAt(Camera.CFrame.Position, Part.Position),
+					Smoothness
+				)
+			end
+		end
+	end
+
+	-- ESP per player
+	for _, OtherPlayer in ipairs(Players:GetPlayers()) do
+		if OtherPlayer == Player then continue end
+
+		local obj = EspObjects[OtherPlayer.UserId]
+		if not obj then continue end
+
+		local Root = obj.Character and obj.Character:FindFirstChild("HumanoidRootPart")
+		local Hum  = obj.HumanoidRef
+
+		-- Distance check
+		local LocalChar = Player.Character
+		local LocalRoot = LocalChar and LocalChar:FindFirstChild("HumanoidRootPart")
+		local InRange = false
+
+		if Root and LocalRoot then
+			InRange = (Root.Position - LocalRoot.Position).Magnitude <= EspDistance
+		end
+
+		local ShowEsp    = EspEnabled and InRange
+		local ShowHitbox = ShowEsp and HitboxEnabled
+		local ShowHealth = ShowEsp and HealthBarEnabled
+
+		obj.Billboard.Enabled = ShowEsp
+		obj.Hitbox.Enabled    = ShowHitbox
+		obj.HealthBG.Enabled  = ShowHealth
+
+		-- Update health bar fill
+		if ShowHealth and Hum then
+			local Pct = math.clamp(Hum.Health / Hum.MaxHealth, 0, 1)
+			obj.HealthFill.Size = UDim2.new(1, 0, Pct, 0)
+			-- Colour shifts green → red as health drops
+			obj.HealthFill.BackgroundColor3 = Color3.fromRGB(
+				math.floor(220 * (1-Pct)),
+				math.floor(220 * Pct),
+				0
+			)
+		end
+	end
+end)
